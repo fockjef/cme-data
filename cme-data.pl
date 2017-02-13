@@ -2,10 +2,12 @@
 
 use local::lib '~/perlmods';
 use strict;
+use File::Basename;
+use Cwd 'abs_path';
 use DBI;
 use LWP::Simple;
 
-chdir File::Basename::dirname(Cwd::abs_path($0));
+chdir scalar((fileparse(abs_path($0)))[1]);
 
 my $dbFile  = "cme-data.db";
 my $dataDir = "data/";
