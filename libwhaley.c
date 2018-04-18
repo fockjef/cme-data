@@ -135,7 +135,7 @@ static void whaley_IV( sqlite3_context *context, int argc, sqlite3_value **argv)
 	}
 
 	whaleyOpt = PC ? whaleyCall : whaleyPut;
-	if( p == fabs(X-F) || p < (*whaleyOpt)(F,X,vMin,T,r)|| p > (*whaleyOpt)(F,X,vMax,T,r) ){
+	if( ( p == fabs(X-F) && (X>F)^PC ) || p < (*whaleyOpt)(F,X,vMin,T,r) || p > (*whaleyOpt)(F,X,vMax,T,r) ){
 		// error: implied vol outside range [vMin,vMax]
 		return;
 	}

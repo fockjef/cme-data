@@ -6,26 +6,40 @@ use File::Basename;
 use Cwd 'abs_path';
 use DBI;
 use LWP::Simple;
-
-chdir scalar((fileparse(abs_path($0)))[1]);
+use JSON;
 
 my $dbFile  = "cme-data.db";
-my $dataDir = "data/";
-my $cmeFtp  = "ftp://ftp.cmegroup.com/pub/settle/";
+my $dataDir = "data";
+my $cmeFtp  = 'ftp://ftp.cmegroup.com/pub/settle/';
 
-my @Files = scalar(@ARGV) ? @ARGV : do{ my $ftp = get $cmeFtp; ($ftp =~ /(?:cme|cbt)\.settle\.\d{8}\.s\.csv\.zip/g)};
-my %Dates;
+# change to proper working directory
+chdir scalar((fileparse(abs_path($0)))[1]);
 
+# setup environment
+`sqlite3 -init cme-data.sql $dbFile .q` if !-f $dbFile;
+`gcc -g -fPIC -shared -O2 libwhaley.c -o libwhaley.so -lm` if !-f "libwhaley.so";
+mkdir $dataDir if !-d $dataDir;
+
+# open database, load extensions, and prepare insert statements
 my $dbh = DBI->connect("dbi:SQLite:dbname=$dbFile","","");
-$dbh->sqlite_enable_load_extension(1);
-$dbh->sqlite_load_extension("./libwhaley.so","sqlite3_whaley_init");
+$dbh->sqlite_enable_load_extension(1) or die $dbh->errstr;
+$dbh->sqlite_load_extension("./libwhaley.so","sqlite3_whaley_init") or die $dbh->errstr;
 my $insCSV = $dbh->prepare("INSERT INTO importCSV VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)") or die $dbh->errstr;
 my $procDt = $dbh->prepare("INSERT INTO processDate VALUES (?)") or die $dbh->errstr;
 
+# get list of settlement files
+# ftp://ftp.cmegroup.com not working with LWP get (2018-04-10)
+# my @Files = scalar(@ARGV) ? @ARGV : do{ my $ftp = get $cmeFtp; ($ftp =~ /(?:cme|cbt)\.settle\.\d{8}\.s\.csv\.zip/g)};
+my @Files = scalar(@ARGV) ? @ARGV : do{ my $ftp = `wget -qO - '$cmeFtp'`; ($ftp =~ /(?:cme|cbt)\.settle\.\d{8}\.s\.csv\.zip/g)};
+
+# process settlement files
+my %Dates;
 foreach my $f (@Files){
 	print "$f\n" unless $ENV{QUIET};
-	if( scalar(@ARGV) || (!-e $dataDir.$f  && is_success(getstore $cmeFtp.$f, $dataDir.$f)) ){
-		$f = $dataDir.$f if !scalar(@ARGV);
+	# ftp://ftp.cmegroup.com not working with LWP get (2018-04-10)
+	# if( scalar(@ARGV) || (!-e $dataDir.$f  && is_success(getstore $cmeFtp.$f, $dataDir.$f)) ){
+	if( scalar(@ARGV) || (!-e "$dataDir/$f"  && !system("wget -qO '$dataDir/$f' '$cmeFtp$f'")) ){
+		$f = "$dataDir/$f" if !scalar(@ARGV);
 		open my $IN, -T $f ? $f : "zcat $f |";
 		<$IN>; #throw away header
 		$dbh->do("BEGIN");
@@ -38,11 +52,20 @@ foreach my $f (@Files){
 		close $IN;
 	}
 }
+
+# run triggers to process each day's data
 foreach my $d (sort keys %Dates){
 	print "$d\n" unless $ENV{QUIET};
 	$procDt->execute($d) or die $procDt->errstr;
 }
-$dbh->do("VACUUM");
+
+# generate cme-data.js
+my $json = ($dbh->selectrow_array("SELECT json FROM cmedata"))[0];
+open JSON, ">cme-data.js";
+print JSON $json;
+close JSON;
+
+# cleanup
 $dbh->disconnect;
 exit;
 
