@@ -1,0 +1,112 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>cme-data</title>
+        <script src="http://fockjef.net/js/templ.js"></script>
+        <script src="http://fockjef.net/js/stats.js"></script>
+        <script>
+            var CMEData = {}, OFFSET = 0, TEMPLATE = "";
+
+            function hvol(x,n){
+                if( x.length <= n ) return undefined;
+                return 100*Math.sqrt(260)*stats.stdev(x.slice(0,n).map(function(y,i){return Math.log(y/x[i+1])}));
+                //return 100*Math.sqrt(260)*stats.stdev(x.slice(0,n).map(function(y,i){return y/x[i+1]-1}));
+            }
+
+            function downloadCSV(){
+                var file = "cme-data-"+CMEData.dates[OFFSET]+".csv";
+                var type = "text/csv;charset=utf-8";
+                var header = "date,code,month,price,vol,hvol10,hvol20,hvol50,hvol90";
+                var csv = [].concat.apply([header],CMEData.data.map(function(d){
+                    return d.months.filter(function(m){return m.vols[OFFSET-m.offset]}).map(function(m){
+                        var temp = m.settles[OFFSET-m.offset] ?
+                            [CMEData.dates[OFFSET],d.code,m.month,Number(m.settles[OFFSET-m.offset]).toFixed(d.precision),m.vols[OFFSET-m.offset]*100,hvol(m.settles.slice(OFFSET-m.offset),10),hvol(m.settles.slice(OFFSET-m.offset),20),hvol(m.settles.slice(OFFSET-m.offset),50),hvol(m.settles.slice(OFFSET-m.offset),90)] :
+                            [CMEData.dates[OFFSET],d.code,m.month,undefined,m.vols[OFFSET-m.offset]*100];
+                        return temp.join(",");
+                    });
+                })).join("\n");
+                if( navigator.msSaveBlob ){
+                    navigator.msSaveBlob(new Blob([csv],{"type":type}),file);
+                }
+                else{
+                    link = document.createElement('a');
+                    link.setAttribute('href', "data:"+type+","+encodeURI(csv));
+                    link.setAttribute('download', file);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }
+            }
+
+            function calcVols(i){
+                OFFSET = parseInt(i);
+                document.body.innerHTML = templ.ate(TEMPLATE,CMEData);
+            }
+
+            window.onload = function(){
+                TEMPLATE = document.getElementById("vol-template").innerHTML;
+                var xhr = new XMLHttpRequest();
+                xhr.onload = function(){
+                    if( this.status == 200 ){
+                        CMEData = JSON.parse(this.responseText);
+                        calcVols(OFFSET);
+                    }
+                    else{
+                        alert("Um, something is wrong. It's probably not your fault, but just in case don't do that again");
+                    }
+                };
+                xhr.open("GET","cme-data.js");
+                xhr.send();
+            };
+        </script>
+        <style>
+            body        { font-family: sans-serif; margin: 0px; padding: 0px; text-align: center; }
+            table       { margin: 20px auto; border-collapse: collapse; }
+            td.product  { background: #bbb; }
+            tr.even     { background: #ddd; }
+            tr.odd      { background: #fff; }
+            td.month    { font-style: italic; }
+            td.price    { font-family: monospace; padding: 3px 12px; text-align: right; }
+            td.vol      { font-family: monospace; padding: 3px 9px; text-align: right; width: 30px; }
+            #menu       { position: fixed; top: 5px; right: 10px; }
+            #menu > *   { width: 120px; background: #eee; border: 1px solid #666; margin: 5px; width: 120px; display: block; }
+            #loading    { margin: 200px auto; }
+        </style>
+    </head>
+    <body>
+        <img id="loading" src="../img/spinner.gif" alt="loading...">
+    </body>
+</html>
+
+<script id="vol-template" type="x-template/templ">
+<div id="menu">
+    <select onchange="calcVols(this.value)">
+    {{#dates}}
+        <option value="{{#-1}}" {{#-1==OFFSET?"selected":""}}>{{.}}</option>
+    {{/dates}}
+    </select>
+    <button id="csv" onclick="downloadCSV()">Download CSV</button>
+</div>
+<h3>{{dates[OFFSET]}}</h3>
+<table>
+{{#data}}
+    <tr><td class="product" colspan="7">{{name}} ({{code}})</td></tr>
+    <tr><th>&nbsp;</th><th>price</th><th>v</th><th>10</th><th>20</th><th>50</th><th>90</th></tr>
+    {{#months}}
+        {{#this.vols[OFFSET-this.offset]}}
+            <tr class="{{#%2?'even':'odd'}}">
+            <td class="month">{{month}}</td>
+            <td class="price">{{../settles[OFFSET-../offset].toFixed(../../precision)}}</td>
+            <td class="vol">{{(../vols[OFFSET-../offset]*100).toFixed(1)}}</td>
+            <td class="vol">{{hvol(../settles.slice(OFFSET-../offset),10).toFixed(1)}}</td>
+            <td class="vol">{{hvol(../settles.slice(OFFSET-../offset),20).toFixed(1)}}</td>
+            <td class="vol">{{hvol(../settles.slice(OFFSET-../offset),50).toFixed(1)}}</td>
+            <td class="vol">{{hvol(../settles.slice(OFFSET-../offset),90).toFixed(1)}}</td>
+            </tr>
+        {{/this.vols[OFFSET-this.offset]}}
+    {{/months}}
+    <tr><td colspan="7">&nbsp;</td></tr>
+{{/data}}
+</table>
+</script>

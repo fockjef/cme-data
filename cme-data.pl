@@ -7,6 +7,7 @@ use Cwd 'abs_path';
 use DBI;
 use LWP::Simple;
 use JSON;
+use List::MoreUtils qw(uniq);
 
 my $dbFile  = "cme-data.db";
 my $dataDir = "data";
@@ -30,7 +31,7 @@ my $procDt = $dbh->prepare("INSERT INTO processDate VALUES (?)") or die $dbh->er
 # get list of settlement files
 # ftp://ftp.cmegroup.com not working with LWP get (2018-04-10)
 # my @Files = scalar(@ARGV) ? @ARGV : do{ my $ftp = get $cmeFtp; ($ftp =~ /(?:cme|cbt)\.settle\.\d{8}\.s\.csv\.zip/g)};
-my @Files = scalar(@ARGV) ? @ARGV : do{ my $ftp = `wget -qO - '$cmeFtp'`; ($ftp =~ /(?:cme|cbt)\.settle\.\d{8}\.s\.csv\.zip/g)};
+my @Files = scalar(@ARGV) ? @ARGV : do{ my $ftp = `wget -qO - '$cmeFtp'`; uniq ($ftp =~ /(?:cme|cbt)\.settle\.\d{8}\.s\.csv\.zip/g)};
 
 # process settlement files
 my %Dates;
