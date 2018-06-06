@@ -97,7 +97,7 @@
 <h3>{{dates[OFFSET]}}</h3>
 <table>
 {{#data}}
-    <tr><td class="product" colspan="7">{{name}} ({{code}})</td></tr>
+    <tr><td class="product" colspan="{{VOLDAYS.length+3}}">{{name}} ({{code}})</td></tr>
     <tr><th>&nbsp;</th><th>price</th><th>v</th>{{#VOLDAYS}}<th>{{.}}</th>{{/VOLDAYS}}</tr>
     {{#months}}
         {{#this.vols[OFFSET-this.offset]}}
