@@ -6,7 +6,8 @@
         <script src="https://fockjef.net/js/templ.js"></script>
         <script src="https://fockjef.net/js/stats.js"></script>
         <script>
-            var CMEData = {}, OFFSET = 0, TEMPLATE = "";
+            var CMEData = {}, OFFSET = 0, TEMPLATE = "", VOLDAYS = [10,20,50,90];
+            location.hash = VOLDAYS.join(",");
 
             function hvol(x,n){
                 if( x.length <= n ) return undefined;
@@ -59,6 +60,10 @@
                 xhr.open("GET","cme-data.js");
                 xhr.send();
             };
+            window.onhashchange = function(){
+                VOLDAYS = location.hash.substr(1).split(",");
+                calcVols(OFFSET);
+            };
         </script>
         <style>
             body        { font-family: sans-serif; margin: 0px; padding: 0px; text-align: center; }
@@ -99,10 +104,9 @@
             <td class="month">{{month}}</td>
             <td class="price">{{../settles[OFFSET-../offset].toFixed(../../precision)}}</td>
             <td class="vol">{{(../vols[OFFSET-../offset]*100).toFixed(1)}}</td>
-            <td class="vol">{{hvol(../settles.slice(OFFSET-../offset),10).toFixed(1)}}</td>
-            <td class="vol">{{hvol(../settles.slice(OFFSET-../offset),20).toFixed(1)}}</td>
-            <td class="vol">{{hvol(../settles.slice(OFFSET-../offset),50).toFixed(1)}}</td>
-            <td class="vol">{{hvol(../settles.slice(OFFSET-../offset),90).toFixed(1)}}</td>
+            {{#VOLDAYS}}
+				<td class="vol">{{hvol(../../settles.slice(OFFSET-../../offset),this).toFixed(1)}}</td>
+			{{/VOLDAYS}}
             </tr>
         {{/this.vols[OFFSET-this.offset]}}
     {{/months}}
