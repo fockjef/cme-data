@@ -7,8 +7,7 @@
         <script src="https://fockjef.net/js/stats.js"></script>
         <script>
             var CMEData = {}, OFFSET = 0, TEMPLATE = "", VOLDAYS = [10,20,50,90];
-            location.hash = VOLDAYS.join(",");
-
+            
             function hvol(x,n){
                 if( x.length <= n ) return undefined;
                 return 100*Math.sqrt(260)*stats.stdev(x.slice(0,n).map(function(y,i){return Math.log(y/x[i+1])}));
@@ -47,6 +46,11 @@
 
             window.onload = function(){
                 TEMPLATE = document.getElementById("vol-template").innerHTML;
+                location.hash = location.hash || VOLDAYS.join(",");
+				window.onhashchange = function(){
+					VOLDAYS = location.hash.substr(1).split(",");
+					calcVols(OFFSET);
+				};
                 var xhr = new XMLHttpRequest();
                 xhr.onload = function(){
                     if( this.status == 200 ){
@@ -59,10 +63,6 @@
                 };
                 xhr.open("GET","cme-data.js");
                 xhr.send();
-            };
-            window.onhashchange = function(){
-                VOLDAYS = location.hash.substr(1).split(",");
-                calcVols(OFFSET);
             };
         </script>
         <style>
@@ -97,7 +97,7 @@
 <table>
 {{#data}}
     <tr><td class="product" colspan="7">{{name}} ({{code}})</td></tr>
-    <tr><th>&nbsp;</th><th>price</th><th>v</th><th>10</th><th>20</th><th>50</th><th>90</th></tr>
+    <tr><th>&nbsp;</th><th>price</th><th>v</th>{{#VOLDAYS}}<th>{{.}}</th>{{/VOLDAYS}}</tr>
     {{#months}}
         {{#this.vols[OFFSET-this.offset]}}
             <tr class="{{#%2?'even':'odd'}}">
