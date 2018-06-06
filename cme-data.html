@@ -17,11 +17,11 @@
             function downloadCSV(){
                 var file = "cme-data-"+CMEData.dates[OFFSET]+".csv";
                 var type = "text/csv;charset=utf-8";
-                var header = "date,code,month,price,vol,hvol10,hvol20,hvol50,hvol90";
+                var header = "date,code,month,price,vol,"+VOLDAYS.map(function(days){return "hvol"+days}).join(",");
                 var csv = [].concat.apply([header],CMEData.data.map(function(d){
                     return d.months.filter(function(m){return m.vols[OFFSET-m.offset]}).map(function(m){
                         var temp = m.settles[OFFSET-m.offset] ?
-                            [CMEData.dates[OFFSET],d.code,m.month,Number(m.settles[OFFSET-m.offset]).toFixed(d.precision),m.vols[OFFSET-m.offset]*100,hvol(m.settles.slice(OFFSET-m.offset),10),hvol(m.settles.slice(OFFSET-m.offset),20),hvol(m.settles.slice(OFFSET-m.offset),50),hvol(m.settles.slice(OFFSET-m.offset),90)] :
+                            [CMEData.dates[OFFSET],d.code,m.month,Number(m.settles[OFFSET-m.offset]).toFixed(d.precision),m.vols[OFFSET-m.offset]*100].concat(VOLDAYS.map(function(days){return hvol(m.settles.slice(OFFSET-m.offset),days)})) :
                             [CMEData.dates[OFFSET],d.code,m.month,undefined,m.vols[OFFSET-m.offset]*100];
                         return temp.join(",");
                     });
