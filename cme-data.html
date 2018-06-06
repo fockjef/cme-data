@@ -7,7 +7,7 @@
         <script src="https://fockjef.net/js/stats.js"></script>
         <script>
             var CMEData = {}, OFFSET = 0, TEMPLATE = "", VOLDAYS = [10,20,50,90];
-            
+
             function hvol(x,n){
                 if( x.length <= n ) return undefined;
                 return 100*Math.sqrt(260)*stats.stdev(x.slice(0,n).map(function(y,i){return Math.log(y/x[i+1])}));
@@ -46,11 +46,12 @@
 
             window.onload = function(){
                 TEMPLATE = document.getElementById("vol-template").innerHTML;
-                location.hash = location.hash || VOLDAYS.join(",");
-				window.onhashchange = function(){
-					VOLDAYS = location.hash.substr(1).split(",");
-					calcVols(OFFSET);
-				};
+                VOLDAYS = location.hash.match(/\d+/g) || VOLDAYS;
+                location.hash = VOLDAYS.join(",");
+                window.onhashchange = function(){
+                    VOLDAYS = location.hash.substr(1).split(",");
+                    calcVols(OFFSET);
+                };
                 var xhr = new XMLHttpRequest();
                 xhr.onload = function(){
                     if( this.status == 200 ){
@@ -105,8 +106,8 @@
             <td class="price">{{../settles[OFFSET-../offset].toFixed(../../precision)}}</td>
             <td class="vol">{{(../vols[OFFSET-../offset]*100).toFixed(1)}}</td>
             {{#VOLDAYS}}
-				<td class="vol">{{hvol(../../settles.slice(OFFSET-../../offset),this).toFixed(1)}}</td>
-			{{/VOLDAYS}}
+                <td class="vol">{{hvol(../../settles.slice(OFFSET-../../offset),this).toFixed(1)}}</td>
+            {{/VOLDAYS}}
             </tr>
         {{/this.vols[OFFSET-this.offset]}}
     {{/months}}
