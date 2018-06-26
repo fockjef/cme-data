@@ -96,8 +96,8 @@ BEGIN
     WHERE date=NEW.date;
 
     -- delete holidays
-    DELETE FROM futures WHERE futures.date=NEW.date AND NEW.date IN (SELECT f.date FROM futures f GROUP BY f.date HAVING MAX(f.change)=0);
-    DELETE FROM options WHERE options.date=NEW.date AND NEW.date IN (SELECT o.date FROM options o GROUP BY o.date HAVING MAX(o.change)=0);
+    DELETE FROM futures WHERE futures.date=NEW.date AND NEW.date IN (SELECT f.date FROM futures f GROUP BY f.date HAVING MAX(ABS(f.change))=0);
+    DELETE FROM options WHERE options.date=NEW.date AND NEW.date IN (SELECT o.date FROM options o GROUP BY o.date HAVING MAX(ABS(o.change))=0);
 
     -- generate cubic spline
     DELETE FROM __knots;
