@@ -26,7 +26,20 @@ my $dbh = DBI->connect("dbi:SQLite:dbname=$dbFile","","");
 $dbh->sqlite_enable_load_extension(1) or die $dbh->errstr;
 $dbh->sqlite_load_extension("./libwhaley.so","sqlite3_whaley_init") or die $dbh->errstr;
 my $insCSV = $dbh->prepare("INSERT INTO importCSV VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)") or die $dbh->errstr;
-my $procDt = $dbh->prepare("INSERT INTO processDate VALUES (?)") or die $dbh->errstr;
+my $procDate = $dbh->prepare("INSERT INTO process(function,date) VALUES ('processDate',?)") or die $dbh->errstr;
+my $insRate = $dbh->prepare("INSERT OR REPLACE INTO intrate(date,r) VALUES (?,?)") or die $dbh->errstr;
+
+# get interest rate data
+my $data = get 'https://websvcgatewayx2.frbny.org/autorates_fedfunds_external/services/v1_0/fedfunds/xml/retrieveLastN?n=5&typ=RATE';
+my $series = ($data =~ /(<Series [^>]*FUNDRATE_OBS_POINT="50%"[\w\W]*?<\/Series>)/)[0];
+$dbh->do("BEGIN");
+foreach my $obs (reverse ($series =~ /<Obs .*?\/>/g)){
+	my $date = ($obs =~ /TIME_PERIOD="(\d{4}-\d{2}-\d{2})"/)[0];
+	my $rate = ($obs =~ /OBS_VALUE="([+-\d.]+)"/)[0]/100;
+	$insRate->execute($date,$rate) or die $insRate->errstr;
+	print "$date\t$rate\n"  unless $ENV{QUIET};
+}
+$dbh->do("COMMIT");
 
 # get list of settlement files
 # ftp://ftp.cmegroup.com not working with LWP get (2018-04-10)
@@ -35,7 +48,8 @@ my @Files = scalar(@ARGV) ? @ARGV : do{ my $ftp = `wget -qO - '$cmeFtp'`; uniq (
 
 # process settlement files
 my %Dates;
-foreach my $f (@Files){
+my $numIns = 0;
+foreach my $f (sort @Files){
 	print "$f\n" unless $ENV{QUIET};
 	# ftp://ftp.cmegroup.com not working with LWP get (2018-04-10)
 	# if( scalar(@ARGV) || (!-e $dataDir.$f  && is_success(getstore $cmeFtp.$f, $dataDir.$f)) ){
@@ -43,21 +57,23 @@ foreach my $f (@Files){
 		$f = "$dataDir/$f" if !scalar(@ARGV);
 		open my $IN, -T $f ? $f : "zcat $f |";
 		<$IN>; #throw away header
-		$dbh->do("BEGIN");
 		while(<$IN>){
 			my @data = (/"([^"]*)"/g);
 			$Dates{$data[0]} = 1 if $data[0] =~ /^\d{4}-\d{2}-\d{2}$/;
+			$dbh->do("BEGIN") if $numIns++ % 1000000 == 0;
 			$insCSV->execute(@data) or die $insCSV->errstr;
+			$dbh->do("COMMIT") if $numIns % 1000000 == 0;
 		}
-		$dbh->do("COMMIT");
 		close $IN;
 	}
 }
+$dbh->do("COMMIT") if $numIns % 1000000 != 0;
+print "$numIns inserts\n" unless $ENV{QUIET};
 
 # run triggers to process each day's data
 foreach my $d (sort keys %Dates){
 	print "$d\n" unless $ENV{QUIET};
-	$procDt->execute($d) or die $procDt->errstr;
+	$procDate->execute($d) or die $procDate->errstr;
 }
 
 # generate cme-data.js
