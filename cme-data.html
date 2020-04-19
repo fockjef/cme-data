@@ -10,7 +10,8 @@
 
             function hvol(x,n){
                 if( x.length <= n ) return undefined;
-                return 100*Math.sqrt(260)*stats.stdev(x.slice(0,n).map(function(y,i){return Math.log(y/x[i+1])}));
+                var synthetic = -!!document.getElementById("synthetic").checked;
+                return 100*Math.sqrt(260)*stats.stdev(x.slice(0,n).map(function(y,i){return Math.log(y.slice(synthetic)[0]/x[i+1].slice(synthetic)[0])}));
                 //return 100*Math.sqrt(260)*stats.stdev(x.slice(0,n).map(function(y,i){return y/x[i+1]-1}));
             }
 
@@ -40,8 +41,15 @@
             }
 
             function calcVols(i){
-                OFFSET = parseInt(i);
-                document.body.innerHTML = templ.ate(TEMPLATE,CMEData);
+                i = CMEData.dates.indexOf(i||document.getElementById("date").value);
+                if( i !== -1 ){
+                    OFFSET = i;
+                    document.getElementById("date").classList.remove("error");
+                    document.getElementById("content").innerHTML = templ.ate(TEMPLATE,CMEData);
+                }
+                else{
+                    document.getElementById("date").classList.add("error");
+                }
             }
 
             window.onload = function(){
@@ -50,13 +58,16 @@
                 location.hash = VOLDAYS.join(",");
                 window.onhashchange = function(){
                     VOLDAYS = location.hash.substr(1).split(",");
-                    calcVols(OFFSET);
+                    calcVols(CMEData.dates[OFFSET]);
                 };
                 var xhr = new XMLHttpRequest();
                 xhr.onload = function(){
                     if( this.status == 200 ){
                         CMEData = JSON.parse(this.responseText);
-                        calcVols(OFFSET);
+                        var date = document.getElementById("date");
+                        date.value = date.max = CMEData.dates[0];
+                        date.min = CMEData.dates[CMEData.dates.length-1];
+                        calcVols(CMEData.dates[OFFSET]);
                     }
                     else{
                         alert("Um, something is wrong. It's probably not your fault, but just in case don't do that again");
@@ -67,50 +78,61 @@
             };
         </script>
         <style>
-            body        { font-family: sans-serif; margin: 0px; padding: 0px; text-align: center; }
-            table       { margin: 20px auto; border-collapse: collapse; }
-            td.product  { background: #bbb; }
-            tr.even     { background: #ddd; }
-            tr.odd      { background: #fff; }
-            td.month    { font-style: italic; }
-            td.price    { font-family: monospace; padding: 3px 12px; text-align: right; }
-            td.vol      { font-family: monospace; padding: 3px 9px; text-align: right; width: 30px; }
-            #menu       { position: fixed; top: 5px; right: 10px; }
-            #menu > *   { width: 120px; background: #eee; border: 1px solid #666; margin: 5px; width: 120px; display: block; }
-            #loading    { margin: 200px auto; }
+            body          { font-family: sans-serif; margin: 0px; padding: 0px; text-align: center; }
+            table         { margin: 20px auto; border-collapse: collapse; }
+            td.product    { background: #bbb; }
+            tr.even       { background: #ddd; }
+            tr.odd        { background: #fff; }
+            tr.synthetic  { font-weight: bold; }
+            td.month      { font-style: italic; }
+            td.price      { font-family: monospace; padding: 3px 12px; text-align: right; }
+            td.vol        { font-family: monospace; padding: 3px 9px; text-align: right; width: 30px; }
+            #menu         { position: fixed; top: 5px; right: 10px; text-align: right; }
+            #menu > input { background: #eee; border: 1px solid #666; display: inline-block; margin: 5px; }
+            #loading      { margin: 200px auto; }
+            #date.error   { background: salmon; }
         </style>
     </head>
     <body>
-        <img id="loading" src="../img/spinner.gif" alt="loading...">
+        <div id="menu">
+            <input id="date" type="date" onchange="calcVols(this.value)"><br>
+            <input id="synthetic" type="checkbox" onchange="calcVols()">
+            <label for="synthetic">Use synthetics&nbsp;&nbsp;</label>
+        </div>
+        <div id="content">
+            <img id="loading" src="../img/spinner.gif" alt="loading...">
+        </div>
     </body>
 </html>
 
 <script id="vol-template" type="x-template/templ">
-<div id="menu">
-    <select onchange="calcVols(this.value)">
-    {{#dates}}
-        <option value="{{#-1}}" {{#-1==OFFSET?"selected":""}}>{{.}}</option>
-    {{/dates}}
-    </select>
-    <button id="csv" onclick="downloadCSV()">Download CSV</button>
-</div>
 <h3>{{dates[OFFSET]}}</h3>
 <table>
 {{#data}}
     <tr><td class="product" colspan="{{VOLDAYS.length+3}}">{{name}} ({{code}})</td></tr>
     <tr><th>&nbsp;</th><th>price</th><th>v</th>{{#VOLDAYS}}<th>{{.}}</th>{{/VOLDAYS}}</tr>
-    {{#months}}
-        {{#this.vols[OFFSET-this.offset]}}
-            <tr class="{{#%2?'even':'odd'}}">
+    {{#months.filter(function(m){return OFFSET>=m.offset&&m.vols.length>OFFSET-m.offset})}}
+        {{#vols[OFFSET-this.offset]}}
+        <tr class="{{#%2?'even':'odd'}}">
             <td class="month">{{month}}</td>
-            <td class="price">{{../settles[OFFSET-../offset].toFixed(../../precision)}}</td>
-            <td class="vol">{{(../vols[OFFSET-../offset]*100).toFixed(1)}}</td>
+            <td class="price">{{../settles[OFFSET-../offset][0].toFixed(../../precision)}}</td>
+            <td class="vol">{{(this*100).toFixed(1)}}</td>
             {{#VOLDAYS}}
                 <td class="vol">{{hvol(../../settles.slice(OFFSET-../../offset),this).toFixed(1)}}</td>
             {{/VOLDAYS}}
-            </tr>
-        {{/this.vols[OFFSET-this.offset]}}
-    {{/months}}
+        </tr>
+        {{/vols[OFFSET-this.offset]}}
+        {{#settles[OFFSET-this.offset][1]}}
+        <tr class="{{#%2?'even':'odd'}} synthetic">
+            <td class="month">&nbsp;</td>
+            <td class="price">{{this.toFixed(../../precision)}}</td>
+            <td class="vol">&nbsp;</td>
+            {{#VOLDAYS}}
+                <td class="vol">&nbsp;</td>
+            {{/VOLDAYS}}
+        </tr>
+        {{/settles[OFFSET-this.offset][1]}}
+    {{/months.filter(function(m){return OFFSET>=m.offset&&m.vols.length>OFFSET-m.offset})}}
     <tr><td colspan="7">&nbsp;</td></tr>
 {{/data}}
 </table>

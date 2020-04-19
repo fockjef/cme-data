@@ -1,15 +1,16 @@
 CREATE TABLE products(ID TEXT PRIMARY KEY, code TEXT, name TEXT, strikeMult REAL, priceMult REAL, dollarMult REAL, minTickF REAL, minTickO REAL, precision INT, isDecimal INT);
 CREATE TABLE intrate (date DATE PRIMARY KEY, r REAL);
-CREATE TABLE futures (date DATE, code TEXT, month TEXT, H REAL, L REAL, C REAL, change REAL, volume INT, oi INT, PRIMARY KEY(date,code,month));
+CREATE TABLE futures (date DATE, code TEXT, month TEXT, H REAL, L REAL, C REAL, synth REAL, change REAL, volume INT, oi INT, PRIMARY KEY(date,code,month));
 CREATE TABLE options (date DATE, code TEXT, month TEXT, undly TEXT, dte INT, strike REAL, type TEXT, price REAL, change REAL, volume INT, oi INT, vol REAL, skewA REAL, skewB REAL, skewC REAL, PRIMARY KEY(date,code,month,strike,type));
 CREATE TABLE optvols (date DATE, code TEXT, month TEXT, volATM REAL, PRIMARY KEY(date,code,month));
 CREATE TABLE __knots (optID INT PRIMARY key, code TEXT, month TEXT, t REAL, y REAL, h REAL, b REAL, u REAL, v REAL, z REAL, skewA REAL, skewB REAL, skewC REAL);
-CREATE VIEW importCSV AS SELECT '' BizDt, '' Sym, '' ID, '' StrkPx, '' SecTyp, '' MMY, '' MatDt, '' PutCall, '' Exch, '' Desc, '' LastTrdDt, '' BidPrice, '' OpeningPrice, '' SettlePrice, '' SettleDelta, '' HighLimit, '' LowLimit, '' DHighPrice, '' DLowPrice, '' HighBid, '' LowBid, '' PrevDayVol, '' PrevDayOI, '' FixingPrice, '' UndlyExch, '' UndlyID, '' UndlySecTyp, '' UndlyMMY, '' BankBusDay
-/* importCSV(BizDt,Sym,ID,StrkPx,SecTyp,MMY,MatDt,PutCall,Exch,"Desc",LastTrdDt,BidPrice,OpeningPrice,SettlePrice,SettleDelta,HighLimit,LowLimit,DHighPrice,DLowPrice,HighBid,LowBid,PrevDayVol,PrevDayOI,FixingPrice,UndlyExch,UndlyID,UndlySecTyp,UndlyMMY,BankBusDay) */;
-CREATE VIEW settles AS SELECT o.date date, o.code code, o.month month, f.H H, f.L L, f.C C, f.change change, f.volume volume, f.oi oi, o.volATM volATM FROM optvols o NATURAL LEFT JOIN futures f
-/* settles(date,code,month,H,L,C,change,volume,oi,volATM) */;
-CREATE VIEW process AS SELECT '' function, '' date
-/* process(function,date) */;
+
+CREATE VIEW settles AS SELECT o.date date, o.code code, o.month month, f.H H, f.L L, f.C C, f.synth synth, f.change change, f.volume volume, f.oi oi, o.volATM volATM FROM optvols o NATURAL LEFT JOIN futures f;
+CREATE VIEW importCSV AS SELECT '' BizDt, '' Sym, '' ID, '' StrkPx, '' SecTyp, '' MMY, '' MatDt, '' PutCall, '' Exch, '' Desc, '' LastTrdDt, '' BidPrice, '' OpeningPrice, '' SettlePrice, '' SettleDelta, '' HighLimit, '' LowLimit, '' DHighPrice, '' DLowPrice, '' HighBid, '' LowBid, '' PrevDayVol, '' PrevDayOI, '' FixingPrice, '' UndlyExch, '' UndlyID, '' UndlySecTyp, '' UndlyMMY, '' BankBusDay;
+CREATE VIEW process AS SELECT '' function, '' date;
+
+CREATE INDEX products_idx_code ON products(code);
+
 CREATE TRIGGER trigImportCSV_Fut INSTEAD OF INSERT ON importCSV WHEN NEW.SecTyp='FUT' AND NEW.ID IN (SELECT ID FROM products)
 BEGIN
     -- insert new futures data
@@ -28,6 +29,7 @@ BEGIN
     WHERE
         p.ID=NEW.ID;
 END;
+
 CREATE TRIGGER trigImportCSV_Opt INSTEAD OF INSERT ON importCSV WHEN NEW.SecTyp='OOF' AND NEW.ID IN (SELECT ID FROM products)
 BEGIN
     -- insert new options data
@@ -48,20 +50,24 @@ BEGIN
     WHERE
         p.ID=NEW.ID;
 END;
-CREATE TRIGGER trigUpsertKnots BEFORE INSERT ON __knots WHEN EXISTS (SELECT 1 FROM __knots WHERE rowid=NEW.rowid)
-BEGIN
-    UPDATE __knots SET h=NEW.h, b=NEW.b WHERE NEW.h IS NOT NULL AND rowid=NEW.rowid;
-    UPDATE __knots SET u=NEW.u, v=NEW.v WHERE NEW.u IS NOT NULL AND rowid=NEW.rowid;
-    UPDATE __knots SET z=NEW.z          WHERE NEW.z IS NOT NULL AND rowid=NEW.rowid;
-    UPDATE __knots SET skewA=NEW.skewA, skewB=NEW.skewB, skewC=NEW.skewC WHERE NEW.skewB IS NOT NULL AND rowid=NEW.rowid;
-END;
+
 CREATE TRIGGER trigProcessProcessDate INSTEAD OF INSERT ON process WHEN NEW.function='processDate'
 BEGIN
+    INSERT INTO process(function,date) VALUES ('setSynth' , NEW.date);
     INSERT INTO process(function,date) VALUES ('setVolume', NEW.date);
     INSERT INTO process(function,date) VALUES ('setOI'    , NEW.date);
     INSERT INTO process(function,date) VALUES ('setChange', NEW.date);
     INSERT INTO process(function,date) VALUES ('calcVols' , NEW.date);
 END;
+
+CREATE TRIGGER trigProcessSetSynth INSTEAD OF INSERT ON process WHEN NEW.function='setSynth'
+BEGIN
+    INSERT INTO futures(date,code,month,synth) WITH
+    optsByStrike AS (SELECT date, code, month, strike, MAX(CASE type WHEN 'C' THEN price ELSE NULL END) C, MAX(CASE type WHEN 'P' THEN price ELSE NULL END) P FROM options WHERE date=NEW.date AND month=undly GROUP BY date, code, month, strike)
+    SELECT date, code, month, strike+C-P synthetic FROM optsByStrike WHERE C IS NOT NULL AND P IS NOT NULL GROUP BY date, code, month HAVING ABS(C-P)=MIN(ABS(C-P))
+    ON CONFLICT(date,code,month) DO UPDATE SET synth=excluded.synth WHERE ABS(excluded.synth-futures.C)>=(SELECT p.minTickF FROM products p WHERE p.code=futures.code) AND (excluded.synth>MAX(futures.C,futures.H) OR excluded.synth<MIN(futures.C,futures.L));
+END;
+
 CREATE TRIGGER trigProcessSetVolume INSTEAD OF INSERT ON process WHEN NEW.function='setVolume' AND EXISTS (SELECT date FROM futures WHERE date=NEW.date GROUP BY date HAVING MAX(volume)>0)
 BEGIN
     -- update volume for previous day
@@ -74,6 +80,7 @@ BEGIN
     UPDATE futures SET volume = NULL WHERE date=NEW.date;
     UPDATE options SET volume = NULL WHERE date=NEW.date;
 END;
+
 CREATE TRIGGER trigProcessSetOI INSTEAD OF INSERT ON process WHEN NEW.function='setOI'
 BEGIN
     -- update open interest for previous day
@@ -86,6 +93,7 @@ BEGIN
     UPDATE futures SET oi = NULL WHERE date=NEW.date;
     UPDATE options SET oi = NULL WHERE date=NEW.date;
 END;
+
 CREATE TRIGGER trigProcessSetChange INSTEAD OF INSERT ON process WHEN NEW.function='setChange'
 BEGIN
     -- set change for current day
@@ -99,13 +107,14 @@ BEGIN
     DELETE FROM futures WHERE futures.date=NEW.date AND EXISTS (SELECT f.date FROM futures f WHERE f.date=NEW.date GROUP BY f.date HAVING MAX(ABS(f.change))=0);
     DELETE FROM options WHERE options.date=NEW.date AND EXISTS (SELECT o.date FROM options o WHERE o.date=NEW.date GROUP BY o.date HAVING MAX(ABS(o.change))=0);
 END;
+
 CREATE TRIGGER trigProcessCalcVols INSTEAD OF INSERT ON process WHEN NEW.function='calcVols'
 BEGIN
     -- generate cubic spline
     DELETE FROM __knots;
     INSERT INTO __knots(optID,code,month,t,y) WITH
         currate(date,r) AS (SELECT date, r FROM intrate WHERE date<=NEW.date ORDER BY date DESC LIMIT 1)
-        SELECT o.optId, o.code, o.month, o.strike, whaley_IV(f.C,o.strike,CASE o.type WHEN 'P' THEN 0 ELSE 1 END,o.price,o.dte/261.0,MAX(IFNULL((SELECT r FROM currate),0),0.0001)) FROM (SELECT rowid optId, date, code, month, undly, dte, strike, type, MIN(price) price FROM options WHERE date=NEW.date AND dte GROUP BY date, code, month, strike) o NATURAL JOIN products p JOIN futures f ON o.date=f.date AND o.code=f.code AND o.undly=f.month WHERE o.price>p.minTickO ORDER BY o.code, o.month, o.strike;
+        SELECT o.optId, o.code, o.month, o.strike, whaley_IV(IFNULL(f.synth,f.C),o.strike,CASE o.type WHEN 'P' THEN 0 ELSE 1 END,o.price,o.dte/261.0,MAX(IFNULL((SELECT r FROM currate),0),0.0001)) FROM (SELECT rowid optId, date, code, month, undly, dte, strike, type, MIN(price) price FROM options WHERE date=NEW.date AND dte GROUP BY date, code, month, strike) o NATURAL JOIN products p JOIN futures f ON o.date=f.date AND o.code=f.code AND o.undly=f.month WHERE o.price>p.minTickO ORDER BY o.code, o.month, o.strike;
     -- h + b
     INSERT OR IGNORE INTO __knots(rowid,h,b) SELECT a.rowid, b.t-a.t, 6*(b.y-a.y)/(b.t-a.t) FROM __knots a LEFT JOIN __knots b ON b.rowid=a.rowid+1 AND a.code=b.code AND a.month=b.month;
     -- u + v
@@ -127,26 +136,33 @@ BEGIN
     -- update skew coefficients in options
     UPDATE options SET vol=(SELECT y FROM __knots WHERE optID=options.rowid), skewA=(SELECT skewA FROM __knots WHERE optID=options.rowid), skewB=(SELECT skewB FROM __knots WHERE optID=options.rowid), skewC=(SELECT skewC FROM __knots WHERE optID=options.rowid) WHERE date=NEW.date;
     -- calculate ATM volatility
-    INSERT OR REPLACE INTO optvols(date,code,month,volATM) SELECT NEW.date, code, month, volATM FROM (SELECT o.code code, o.month month, MAX(o.strike), o.vol+(f.C-o.strike)*(o.skewC+(f.C-o.strike)*(skewB+(f.C-o.strike)*skewA)) volATM FROM options o JOIN futures f ON o.date=f.date AND o.code=f.code AND o.undly=f.month WHERE o.date=NEW.date AND o.strike<=f.C AND o.skewA IS NOT NULL GROUP BY o.date, o.code, o.month);
+    INSERT OR REPLACE INTO optvols(date,code,month,volATM) SELECT NEW.date, code, month, volATM FROM (SELECT o.code code, o.month month, MAX(o.strike), o.vol+(IFNULL(f.synth,f.C)-o.strike)*(o.skewC+(IFNULL(f.synth,f.C)-o.strike)*(skewB+(IFNULL(f.synth,f.C)-o.strike)*skewA)) volATM FROM options o JOIN futures f ON o.date=f.date AND o.code=f.code AND o.undly=f.month WHERE o.date=NEW.date AND o.strike<=IFNULL(f.synth,f.C) AND o.skewA IS NOT NULL GROUP BY o.date, o.code, o.month);
     DELETE FROM __knots;
 END;
-CREATE INDEX products_idx_code ON products(code);
+
+CREATE TRIGGER trigUpsertKnots BEFORE INSERT ON __knots WHEN EXISTS (SELECT 1 FROM __knots WHERE rowid=NEW.rowid)
+BEGIN
+    UPDATE __knots SET h=NEW.h, b=NEW.b WHERE NEW.h IS NOT NULL AND rowid=NEW.rowid;
+    UPDATE __knots SET u=NEW.u, v=NEW.v WHERE NEW.u IS NOT NULL AND rowid=NEW.rowid;
+    UPDATE __knots SET z=NEW.z          WHERE NEW.z IS NOT NULL AND rowid=NEW.rowid;
+    UPDATE __knots SET skewA=NEW.skewA, skewB=NEW.skewB, skewC=NEW.skewC WHERE NEW.skewB IS NOT NULL AND rowid=NEW.rowid;
+END;
+
 CREATE VIEW cmedata AS
 WITH
 dateOpt(date) AS (SELECT MIN(date) FROM (SELECT DISTINCT date FROM futures ORDER BY date DESC LIMIT 260)),
 dateFut(date) AS (SELECT MIN(date) FROM (SELECT DISTINCT date FROM futures ORDER BY date DESC LIMIT 520)),
 allCM(code,month) AS (SELECT DISTINCT code, month FROM optvols WHERE date>=(SELECT date FROM dateOpt)),
 opt(date,code,month,vol) AS (SELECT date, code, month, ROUND(volATM,5) FROM optvols WHERE date>=(SELECT date FROM dateOpt) AND (code,month) IN (SELECT code, month FROM allCM) ORDER BY date DESC),
-fut(date,code,month,C) AS (SELECT date, code, month, C FROM futures WHERE date>=(SELECT date FROM dateFut) AND (code,month) IN (SELECT code, month FROM allCM) ORDER BY date DESC),
+fut(date,code,month,C,synth) AS (SELECT date, code, month, C, synth FROM futures f WHERE date BETWEEN (SELECT date FROM dateFut) AND (SELECT MAX(o.date) FROM opt o WHERE f.code=o.code AND f.month=o.month) AND (code,month) IN (SELECT code, month FROM allCM) ORDER BY date DESC),
 dates(date) AS (SELECT DISTINCT date FROM opt ORDER BY date DESC),
 expiry(code,month,date) AS (SELECT code, month, MAX(date) FROM opt GROUP BY code, month),
 offset(code,month,offset) AS (SELECT e.code, e.month, COUNT(d.date) FROM expiry e LEFT JOIN dates d ON e.date<d.date GROUP BY e.code, e.month),
 serial(code,month,isSerial) AS (SELECT DISTINCT code, month, 1 FROM optvols EXCEPT SELECT DISTINCT code, month, 1 FROM futures),
 optMonth(code,month,vols) AS (SELECT code, month, json_group_array(vol) FROM opt GROUP BY code, month ORDER BY code, month),
-futMonth(code,month,settles) AS (SELECT code, month, json_group_array(C) FROM fut GROUP BY code, month ORDER BY code, month),
+futMonth(code,month,settles) AS (SELECT code, month, json_group_array(CASE synth IS NULL WHEN 1 THEN json_array(C) ELSE json_array(C,synth) END) FROM fut GROUP BY code, month ORDER BY code, month),
 data(products) AS (SELECT json_object('code',opt.code,'name',p.name,'precision',p.precision,'months',json_group_array(json_object('month',opt.month,'offset',o.offset,'serial',IFNULL(s.isSerial,0),'vols',json_extract(opt.vols,'$'),'settles',IFNULL(json_extract(fut.settles,'$'),json_array())))) FROM optMonth opt NATURAL LEFT JOIN futMonth fut NATURAL LEFT JOIN serial s NATURAL JOIN offset o NATURAL JOIN products p GROUP BY opt.code ORDER BY opt.code)
-SELECT json_object('data',(SELECT json_group_array(json_extract(products,'$')) FROM data),'dates',(SELECT json_group_array(date) FROM dates)) json
-/* cmedata(json) */;
+SELECT json_object('data',(SELECT json_group_array(json_extract(products,'$')) FROM data),'dates',(SELECT json_group_array(date) FROM dates)) json;
 
 INSERT INTO products VALUES('C','C','Corn',100.0,100.0,50.0,0.25,0.125,2,0);
 INSERT INTO products VALUES('W','W','Wheat',100.0,100.0,50.0,0.25,0.125,2,0);
